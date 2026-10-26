@@ -1,0 +1,8 @@
+pillow>=10.3.0
+# numpy>=1.26        # uncomment in M2
+# fastapi>=0.111     # uncomment in M4
+# uvicorn>=0.29      # uncomment in M4
+# mcp>=1.0           # uncomment in M4
+# streamlit>=1.35    # uncomment in M5
+# transformers>=4.40 # uncomment in M3
+# torch>=2.3         # uncomment in M3 (CPU only)
