@@ -4,5 +4,5 @@ numpy>=1.26
 # uvicorn>=0.29      # uncomment in M4
 # mcp>=1.0           # uncomment in M4
 # streamlit>=1.35    # uncomment in M5
-# transformers>=4.40 # uncomment in M3
-# torch>=2.3         # uncomment in M3 (CPU only)
+transformers>=4.40
+torch>=2.3  # CPU-only; GPU users can swap for torch with CUDA index
