@@ -19,15 +19,55 @@ The REST API (`sentinel.api`) and MCP server (`sentinel.mcp_server`) are thin wr
 
 <!-- TODO: add component diagram once API shape is finalised in M4 -->
 
-## What works (M1)
+## What works (M2)
+
+### Heuristics layer (`sentinel/heuristics.py`)
+
+Three independent scorers, each returning a `float` in `[0, 1]` (1 = confident AI):
+
+| Signal | Function | Idea |
+|--------|----------|------|
+| EXIF absence | `score_exif_absence` | AI images almost never carry camera EXIF tags |
+| JPEG DCT artifacts | `score_dct_artifacts` | Diffusion outputs saved as JPEG show flatter quant tables |
+| Noise floor | `score_noise_floor` | Real photos carry sensor noise; AI outputs are unnaturally smooth |
+
+`HeuristicDetector.detect(path)` combines all three with weights `exif=0.3, dct=0.3, noise=0.4` and returns:
+
+```json
+{
+  "score": 0.73,
+  "label": "AI",
+  "signals": {
+    "exif_absence": 0.8,
+    "dct_artifacts": 0.65,
+    "noise_floor": 0.72
+  },
+  "reasoning": "Scored 0.73 (AI): no camera EXIF metadata, unnaturally smooth noise floor."
+}
+```
+
+Labels: `score >= 0.6` → **AI**, `score <= 0.4` → **REAL**, otherwise **UNCERTAIN**.
+
+### Tests
+
+```bash
+pytest tests/
+```
+
+Coverage targets for M2:
+- `tests/test_heuristics.py` — one test per scorer plus an end-to-end `detect()` test
+- `tests/conftest.py` — shared fixtures exposing `real_path` and `synthetic_path`
+- `tests/fixtures/real.jpg` — a real camera JPEG (carries EXIF, sensor noise)
+- `tests/fixtures/synthetic.jpg` — a Stable Diffusion output (no EXIF, smooth noise floor)
+- `tests/create_fixtures.py` — script used to generate the fixture pair; not part of the test run
+
+### M1 foundation
 
 - `sentinel/` package skeleton with `sentinel/__init__.py` and a stub `sentinel/cli.py`
 - `pyproject.toml` — hatchling build backend, `pip install -e ".[dev]"` installs ruff and pytest
-- `requirements.txt` — pillow pinned as the first runtime dep; future deps commented with their target milestone
+- `requirements.txt` — pillow + numpy as runtime deps; future deps commented with their target milestone
 - `tests/test_scaffold.py` — import smoke test confirming the package is importable
 - MIT license
-
-Nothing classifies images yet. All classification code begins in M2.
 
 ## Install
 
@@ -63,7 +103,7 @@ python -m sentinel.mcp_server
 | # | Milestone | Status |
 |---|-----------|--------|
 | M1 | Scaffold + README | ✅ done |
-| M2 | Heuristics layer | planned |
+| M2 | Heuristics layer | ✅ done |
 | M3 | ML layer | planned |
 | M4 | FastAPI + MCP server | planned |
 | M5 | Streamlit UI + CLI | planned |
