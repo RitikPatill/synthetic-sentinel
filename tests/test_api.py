@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from sentinel.api import app

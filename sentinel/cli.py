@@ -45,7 +45,8 @@ def _print_table(rows: list[dict]) -> None:
         print("-" * len(header))
         for row in rows:
             print(
-                f"{str(row['target']):<40} {row['label']:<10} {row['score']:<8.4f}  {row['reasoning']}"
+                f"{str(row['target']):<40} {row['label']:<10}"
+                f" {row['score']:<8.4f}  {row['reasoning']}"
             )
 
 

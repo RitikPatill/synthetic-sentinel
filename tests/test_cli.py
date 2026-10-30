@@ -13,13 +13,17 @@ from sentinel.detector import Detector
 REAL_RESULT = {
     "score": 0.2,
     "label": "REAL",
-    "signals": {"exif_absence": 0.1, "dct_artifacts": 0.2, "noise_floor": 0.2, "ml_available": False},
+    "signals": {
+        "exif_absence": 0.1, "dct_artifacts": 0.2, "noise_floor": 0.2, "ml_available": False
+    },
     "reasoning": "REAL.",
 }
 AI_RESULT = {
     "score": 0.8,
     "label": "AI",
-    "signals": {"exif_absence": 0.8, "dct_artifacts": 0.8, "noise_floor": 0.8, "ml_available": False},
+    "signals": {
+        "exif_absence": 0.8, "dct_artifacts": 0.8, "noise_floor": 0.8, "ml_available": False
+    },
     "reasoning": "AI.",
 }
 
