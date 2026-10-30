@@ -15,11 +15,9 @@ Detection runs in two sequential layers:
 1. **Heuristics layer** — EXIF metadata checks, JPEG DCT artifact scoring, noise-pattern analysis (Pillow + NumPy). Fast, zero model download.
 2. **ML layer** — a small CPU-only HuggingFace classifier (≤500 MB) fine-tuned on real vs. diffusion images. Falls back gracefully if the model isn't cached.
 
-The REST API (`sentinel.api`) and MCP server (`sentinel.mcp_server`) are thin wrappers over these layers. Both are planned for M4.
+The REST API (`sentinel.api`) accepts `POST /detect` with a URL or base64 image and returns the detection JSON. The MCP server (`sentinel.mcp_server`) registers a `detect_image(image_url)` tool callable by Claude Desktop or any MCP-compatible host.
 
-<!-- TODO: add component diagram once API shape is finalised in M4 -->
-
-## What works (M3)
+## What works (M4)
 
 ### Unified detector (`sentinel/detector.py`)
 
@@ -67,13 +65,70 @@ Three independent scorers, each returning a `float` in `[0, 1]` (1 = confident A
 
 Labels: `score >= 0.6` → **AI**, `score <= 0.4` → **REAL**, otherwise **UNCERTAIN**.
 
+### REST API (`sentinel/api.py`)
+
+`POST /detect` accepts exactly one of `url` or `base64_image` and returns the detection JSON:
+
+```bash
+# Start the server
+python -m sentinel.api          # listens on http://localhost:8000
+
+# Detect via URL
+curl -X POST http://localhost:8000/detect \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/photo.jpg"}'
+
+# Detect via base64
+curl -X POST http://localhost:8000/detect \
+  -H "Content-Type: application/json" \
+  -d '{"base64_image": "<base64-encoded-bytes>"}'
+```
+
+Response schema:
+
+```json
+{
+  "score": 0.76,
+  "label": "AI",
+  "signals": { "exif_absence": 0.8, "dct_artifacts": 0.65, "noise_floor": 0.72, "ml_available": true },
+  "reasoning": "..."
+}
+```
+
+### MCP Server (`sentinel/mcp_server.py`)
+
+Registers a `detect_image(image_url)` tool over stdio for MCP-compatible hosts (Claude Desktop, Cursor, etc.):
+
+```bash
+python -m sentinel.mcp_server
+```
+
+Add to Claude Desktop `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "synthetic-sentinel": {
+      "command": "python",
+      "args": ["-m", "sentinel.mcp_server"]
+    }
+  }
+}
+```
+
 ### Tests
 
 ```bash
 pytest tests/
 ```
 
-Test coverage through M3:
+Source files added in M4:
+- `sentinel/api.py` — FastAPI application; `POST /detect` handler with URL fetch and base64 decode paths
+- `sentinel/mcp_server.py` — MCP server built on `FastMCP`; exposes the `detect_image` tool over stdio
+- `sentinel/__main__.py` — package-level entrypoint (`python -m sentinel`); prints available sub-commands and exits
+
+Test coverage through M4:
+- `tests/test_api.py` — smoke tests for `POST /detect`: schema validation, base64 input, 422 on missing/both fields
 - `tests/test_detector.py` — integration tests for `Detector`: schema validation, weighted fusion, ML-available flag, heuristics-only fallback
 - `tests/test_ml.py` — unit tests for `MLDetector`: schema, score range, label mapping, None-return when pipeline unavailable
 - `tests/test_heuristics.py` — one test per scorer plus an end-to-end `HeuristicDetector.detect()` test
@@ -86,7 +141,7 @@ Test coverage through M3:
 
 - `sentinel/` package skeleton with `sentinel/__init__.py` and a stub `sentinel/cli.py`
 - `pyproject.toml` — hatchling build backend, `pip install -e ".[dev]"` installs ruff and pytest
-- `requirements.txt` — pillow + numpy as runtime deps; future deps commented with their target milestone
+- `requirements.txt` — runtime deps; M4 expanded it to include fastapi, uvicorn, mcp, httpx, transformers, and torch (CPU); streamlit remains commented for M5
 - `tests/test_scaffold.py` — import smoke test confirming the package is importable
 - MIT license
 
@@ -108,15 +163,16 @@ pip install -e .
 ## Quickstart
 
 ```bash
+# REST API
+python -m sentinel.api           # http://localhost:8000
+# curl -X POST http://localhost:8000/detect -H "Content-Type: application/json" \
+#   -d '{"url": "https://example.com/photo.jpg"}'
+
+# MCP server (stdio transport for Claude Desktop / Cursor)
+python -m sentinel.mcp_server
+
 # CLI (available after M5)
 python -m sentinel.cli --help
-
-# REST API (available after M4)
-uvicorn sentinel.api:app --reload
-# POST /detect  { "url": "https://..." }
-
-# MCP server (available after M4)
-python -m sentinel.mcp_server
 ```
 
 ## Roadmap
@@ -126,7 +182,7 @@ python -m sentinel.mcp_server
 | M1 | Scaffold + README | ✅ done |
 | M2 | Heuristics layer | ✅ done |
 | M3 | ML layer | ✅ done |
-| M4 | FastAPI + MCP server | planned |
+| M4 | FastAPI + MCP server | ✅ done |
 | M5 | Streamlit UI + CLI | planned |
 | M6 | Eval script + README GIF | planned |
 
