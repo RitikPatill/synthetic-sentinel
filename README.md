@@ -17,7 +17,7 @@ Detection runs in two sequential layers:
 
 The REST API (`sentinel.api`) accepts `POST /detect` with a URL or base64 image and returns the detection JSON. The MCP server (`sentinel.mcp_server`) registers a `detect_image(image_url)` tool callable by Claude Desktop or any MCP-compatible host.
 
-## What works (M4)
+## What works (M5)
 
 ### Unified detector (`sentinel/detector.py`)
 
@@ -116,18 +116,60 @@ Add to Claude Desktop `claude_desktop_config.json`:
 }
 ```
 
+### CLI (`sentinel/cli.py`)
+
+```bash
+# Single image
+sentinel path/to/photo.jpg
+
+# Multiple images (exits 1 if any is labelled AI)
+sentinel photo.jpg ai_output.png https://example.com/image.jpg
+
+# Custom threshold
+sentinel --threshold 0.7 photo.jpg
+```
+
+Output (tabulate simple format):
+
+```
+target                                   label       score     reasoning
+---------------------------------------  ----------  --------  ---------
+photo.jpg                                REAL        0.2000    REAL. | ML classifier unavailable…
+ai_output.png                            AI          0.8000    AI. | ML classifier scored 0.81…
+```
+
+Exit code: `0` if all images are REAL/UNCERTAIN, `1` if any image is labelled AI.
+
+### Streamlit demo UI (`sentinel/app.py`)
+
+```bash
+streamlit run sentinel/app.py
+```
+
+Drag-drop a JPEG, PNG, or WebP image and instantly see:
+- A colour-coded verdict badge (red = AI, green = REAL, yellow = UNCERTAIN)
+- A horizontal bar chart of all per-signal scores
+- The reasoning string from the detector
+
+<!-- TODO: replace with demo GIF showing a real photo and an AI image scanned side by side -->
+
 ### Tests
 
 ```bash
 pytest tests/
 ```
 
+Source files added in M5:
+- `sentinel/cli.py` — argparse CLI; multi-target, URL download, tabulate table, exit-code contract
+- `sentinel/app.py` — Streamlit UI; file-upload widget, verdict badge, signal bar chart
+
 Source files added in M4:
 - `sentinel/api.py` — FastAPI application; `POST /detect` handler with URL fetch and base64 decode paths
 - `sentinel/mcp_server.py` — MCP server built on `FastMCP`; exposes the `detect_image` tool over stdio
 - `sentinel/__main__.py` — package-level entrypoint (`python -m sentinel`); prints available sub-commands and exits
 
-Test coverage through M4:
+Test coverage through M5:
+- `tests/test_cli.py` — exit-code contract (REAL→0, AI→1, mixed→1), table output contains label/score
 - `tests/test_api.py` — smoke tests for `POST /detect`: schema validation, base64 input, 422 on missing/both fields
 - `tests/test_detector.py` — integration tests for `Detector`: schema validation, weighted fusion, ML-available flag, heuristics-only fallback
 - `tests/test_ml.py` — unit tests for `MLDetector`: schema, score range, label mapping, None-return when pipeline unavailable
@@ -141,7 +183,7 @@ Test coverage through M4:
 
 - `sentinel/` package skeleton with `sentinel/__init__.py` and a stub `sentinel/cli.py`
 - `pyproject.toml` — hatchling build backend, `pip install -e ".[dev]"` installs ruff and pytest
-- `requirements.txt` — runtime deps; M4 expanded it to include fastapi, uvicorn, mcp, httpx, transformers, and torch (CPU); streamlit remains commented for M5
+- `requirements.txt` — runtime deps; M4 added fastapi, uvicorn, mcp, httpx, transformers, and torch (CPU); M5 added streamlit and tabulate (both now uncommented and active)
 - `tests/test_scaffold.py` — import smoke test confirming the package is importable
 - MIT license
 
@@ -163,6 +205,14 @@ pip install -e .
 ## Quickstart
 
 ```bash
+# CLI — scan one or more images
+sentinel photo.jpg ai_art.png
+# or
+python -m sentinel.cli photo.jpg
+
+# Streamlit demo UI
+streamlit run sentinel/app.py
+
 # REST API
 python -m sentinel.api           # http://localhost:8000
 # curl -X POST http://localhost:8000/detect -H "Content-Type: application/json" \
@@ -170,9 +220,6 @@ python -m sentinel.api           # http://localhost:8000
 
 # MCP server (stdio transport for Claude Desktop / Cursor)
 python -m sentinel.mcp_server
-
-# CLI (available after M5)
-python -m sentinel.cli --help
 ```
 
 ## Roadmap
@@ -183,7 +230,7 @@ python -m sentinel.cli --help
 | M2 | Heuristics layer | ✅ done |
 | M3 | ML layer | ✅ done |
 | M4 | FastAPI + MCP server | ✅ done |
-| M5 | Streamlit UI + CLI | planned |
+| M5 | Streamlit UI + CLI | ✅ done |
 | M6 | Eval script + README GIF | planned |
 
 ## License
