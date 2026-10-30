@@ -1,7 +1,6 @@
 """Tests for sentinel.heuristics — M2."""
 
 import numpy as np
-import pytest
 from PIL import Image
 
 from sentinel.heuristics import (

@@ -1,34 +1,57 @@
 # Synthetic Sentinel
 
-> **Is this image real or AI-generated?**
+> Local REST + MCP server that classifies images as AI-generated or real using heuristics and a CPU-only ML model.
 
-A self-contained, privacy-preserving detector for AI-generated images. Runs fully offline on CPU. Exposes results via a FastAPI REST endpoint and an MCP tool so both humans and LLM assistants can query it.
+<!-- TODO: replace with a 5-10 second demo gif. Record with ScreenToGif on
+     Windows or peek on macOS. Save to docs/demo.gif and update path here. -->
+![demo](docs/demo.gif)
 
-## Problem
+## What it is
 
-AI-generated images are ubiquitous in 2026 and detection tooling is fragmented: most detectors are paywalled SaaS or research demos that won't run offline. Journalists, developers, and AI agents need a locally runnable detector they can pipe images through without sending data to a third party.
+Synthetic Sentinel answers one question: **is this image real or AI-generated?** It runs entirely offline on CPU and returns a scored verdict—`AI`, `REAL`, or `UNCERTAIN`—along with per-signal confidence values and a plain-English reasoning string.
 
-## Architecture
+Detection runs in two sequential layers. The heuristics layer (EXIF metadata checks, JPEG DCT artifact scoring, noise-floor analysis) fires instantly without any model download. The ML layer wraps the [`umm-maybe/AI-image-detector`](https://huggingface.co/umm-maybe/AI-image-detector) HuggingFace checkpoint and activates when the model is cached locally; if it is not, the detector falls back to heuristics only. Both layers feed a weighted-fusion `Detector` class that four entry points share: a CLI, a Streamlit UI, a FastAPI REST endpoint, and an MCP stdio server.
 
-Detection runs in two sequential layers:
+## Quickstart
 
-1. **Heuristics layer** — EXIF metadata checks, JPEG DCT artifact scoring, noise-pattern analysis (Pillow + NumPy). Fast, zero model download.
-2. **ML layer** — a small CPU-only HuggingFace classifier (≤500 MB) fine-tuned on real vs. diffusion images. Falls back gracefully if the model isn't cached.
+```bash
+git clone https://github.com/RitikPatill/synthetic-sentinel.git
+cd synthetic-sentinel
 
-The REST API (`sentinel.api`) accepts `POST /detect` with a URL or base64 image and returns the detection JSON. The MCP server (`sentinel.mcp_server`) registers a `detect_image(image_url)` tool callable by Claude Desktop or any MCP-compatible host.
+# Install PyTorch CPU wheel first to avoid pulling in the large CUDA binaries
+pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
 
-## What works (M5)
+# Install the package and dev dependencies
+pip install -e ".[dev]"
 
-### Unified detector (`sentinel/detector.py`)
+# Verify everything is wired up
+pytest tests/
 
-`Detector.detect(path)` is the single entry point for callers. It runs both layers and returns a weighted fusion:
+# Run the REST API
+python -m sentinel.api          # listens on http://localhost:8000
 
-| Weight | Layer |
-|--------|-------|
-| 0.4 | Heuristics (`HeuristicDetector`) |
-| 0.6 | ML classifier (`MLDetector`) |
+# Or launch the interactive UI
+streamlit run sentinel/app.py
+```
 
-When the ML model is unavailable the detector falls back to heuristics-only and sets `signals.ml_available = false`.
+## Usage
+
+**CLI** — scan one or more local files or URLs; exits with code `1` if any image is labelled AI:
+
+```bash
+sentinel photo.jpg ai_art.png https://example.com/image.jpg
+sentinel --threshold 0.7 photo.jpg
+```
+
+**REST API** — POST a URL or a base64-encoded image:
+
+```bash
+curl -X POST http://localhost:8000/detect \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/photo.jpg"}'
+```
+
+Response:
 
 ```json
 {
@@ -45,65 +68,7 @@ When the ML model is unavailable the detector falls back to heuristics-only and 
 }
 ```
 
-### ML layer (`sentinel/ml.py`)
-
-`MLDetector` wraps the [`umm-maybe/AI-image-detector`](https://huggingface.co/umm-maybe/AI-image-detector) HuggingFace checkpoint via a `transformers` image-classification pipeline. The pipeline is lazy-loaded on first call (CPU, `device=-1`) and cached at the class level. If `transformers` is not installed or the model download fails, `MLDetector.detect()` returns `None` and the unified detector falls back to heuristics.
-
-Label normalisation handles model-specific label names: scores under keys containing `artif`, `fake`, or `ai` are used directly; a `human` label is inverted (`1 − score`).
-
-### Heuristics layer (`sentinel/heuristics.py`)
-
-Three independent scorers, each returning a `float` in `[0, 1]` (1 = confident AI):
-
-| Signal | Function | Idea |
-|--------|----------|------|
-| EXIF absence | `score_exif_absence` | AI images almost never carry camera EXIF tags |
-| JPEG DCT artifacts | `score_dct_artifacts` | Diffusion outputs saved as JPEG show flatter quant tables |
-| Noise floor | `score_noise_floor` | Real photos carry sensor noise; AI outputs are unnaturally smooth |
-
-`HeuristicDetector.detect(path)` combines all three with weights `exif=0.3, dct=0.3, noise=0.4`.
-
-Labels: `score >= 0.6` → **AI**, `score <= 0.4` → **REAL**, otherwise **UNCERTAIN**.
-
-### REST API (`sentinel/api.py`)
-
-`POST /detect` accepts exactly one of `url` or `base64_image` and returns the detection JSON:
-
-```bash
-# Start the server
-python -m sentinel.api          # listens on http://localhost:8000
-
-# Detect via URL
-curl -X POST http://localhost:8000/detect \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com/photo.jpg"}'
-
-# Detect via base64
-curl -X POST http://localhost:8000/detect \
-  -H "Content-Type: application/json" \
-  -d '{"base64_image": "<base64-encoded-bytes>"}'
-```
-
-Response schema:
-
-```json
-{
-  "score": 0.76,
-  "label": "AI",
-  "signals": { "exif_absence": 0.8, "dct_artifacts": 0.65, "noise_floor": 0.72, "ml_available": true },
-  "reasoning": "..."
-}
-```
-
-### MCP Server (`sentinel/mcp_server.py`)
-
-Registers a `detect_image(image_url)` tool over stdio for MCP-compatible hosts (Claude Desktop, Cursor, etc.):
-
-```bash
-python -m sentinel.mcp_server
-```
-
-Add to Claude Desktop `claude_desktop_config.json`:
+**MCP server** — add to Claude Desktop `claude_desktop_config.json` to expose a `detect_image` tool to any MCP-compatible host:
 
 ```json
 {
@@ -116,123 +81,72 @@ Add to Claude Desktop `claude_desktop_config.json`:
 }
 ```
 
-### CLI (`sentinel/cli.py`)
+**Streamlit UI** — drag-drop a JPEG, PNG, or WebP file to see a colour-coded verdict badge, a per-signal bar chart, and the reasoning string.
 
-```bash
-# Single image
-sentinel path/to/photo.jpg
+## Architecture
 
-# Multiple images (exits 1 if any is labelled AI)
-sentinel photo.jpg ai_output.png https://example.com/image.jpg
-
-# Custom threshold
-sentinel --threshold 0.7 photo.jpg
-```
-
-Output (tabulate simple format):
+All four entry points call `Detector` directly; none route through each other.
 
 ```
-target                                   label       score     reasoning
----------------------------------------  ----------  --------  ---------
-photo.jpg                                REAL        0.2000    REAL. | ML classifier unavailable…
-ai_output.png                            AI          0.8000    AI. | ML classifier scored 0.81…
+┌──────────┐  ┌───────────┐  ┌──────────────┐  ┌────────────┐
+│   CLI    │  │ Streamlit │  │  FastAPI     │  │ MCP server │
+│ cli.py   │  │  app.py   │  │  /detect     │  │  stdio     │
+└────┬─────┘  └─────┬─────┘  └──────┬───────┘  └─────┬──────┘
+     └──────────────┴───────────────┴─────────────────┘
+                              │
+                       ┌──────▼──────┐
+                       │  Detector   │
+                       │  (weighted  │
+                       │   fusion)   │
+                       └──────┬──────┘
+                  ┌───────────┴───────────┐
+           ┌──────▼──────┐         ┌──────▼──────┐
+           │ Heuristics  │         │     ML      │
+           │ EXIF / DCT  │         │  classifier │
+           │ noise floor │         │ (HuggingFace│
+           └─────────────┘         └─────────────┘
 ```
 
-Exit code: `0` if all images are REAL/UNCERTAIN, `1` if any image is labelled AI.
+Fusion weights: heuristics 0.4, ML classifier 0.6. Thresholds: `>= 0.6` → AI, `<= 0.4` → REAL, otherwise UNCERTAIN.
 
-### Streamlit demo UI (`sentinel/app.py`)
+## Project structure
 
-```bash
-streamlit run sentinel/app.py
 ```
-
-Drag-drop a JPEG, PNG, or WebP image and instantly see:
-- A colour-coded verdict badge (red = AI, green = REAL, yellow = UNCERTAIN)
-- A horizontal bar chart of all per-signal scores
-- The reasoning string from the detector
-
-<!-- TODO: replace with demo GIF showing a real photo and an AI image scanned side by side -->
-
-### Tests
-
-```bash
-pytest tests/
-```
-
-Source files added in M5:
-- `sentinel/cli.py` — argparse CLI; multi-target, URL download, tabulate table, exit-code contract
-- `sentinel/app.py` — Streamlit UI; file-upload widget, verdict badge, signal bar chart
-
-Source files added in M4:
-- `sentinel/api.py` — FastAPI application; `POST /detect` handler with URL fetch and base64 decode paths
-- `sentinel/mcp_server.py` — MCP server built on `FastMCP`; exposes the `detect_image` tool over stdio
-- `sentinel/__main__.py` — package-level entrypoint (`python -m sentinel`); prints available sub-commands and exits
-
-Test coverage through M5:
-- `tests/test_cli.py` — exit-code contract (REAL→0, AI→1, mixed→1), table output contains label/score
-- `tests/test_api.py` — smoke tests for `POST /detect`: schema validation, base64 input, 422 on missing/both fields
-- `tests/test_detector.py` — integration tests for `Detector`: schema validation, weighted fusion, ML-available flag, heuristics-only fallback
-- `tests/test_ml.py` — unit tests for `MLDetector`: schema, score range, label mapping, None-return when pipeline unavailable
-- `tests/test_heuristics.py` — one test per scorer plus an end-to-end `HeuristicDetector.detect()` test
-- `tests/conftest.py` — shared fixtures exposing `real_jpeg` and `synthetic_jpeg` paths
-- `tests/fixtures/real.jpg` — a real camera JPEG (carries EXIF, sensor noise)
-- `tests/fixtures/synthetic.jpg` — a Stable Diffusion output (no EXIF, smooth noise floor)
-- `tests/create_fixtures.py` — script used to generate the fixture pair; not part of the test run
-
-### M1 foundation
-
-- `sentinel/` package skeleton with `sentinel/__init__.py` and a stub `sentinel/cli.py`
-- `pyproject.toml` — hatchling build backend, `pip install -e ".[dev]"` installs ruff and pytest
-- `requirements.txt` — runtime deps; M4 added fastapi, uvicorn, mcp, httpx, transformers, and torch (CPU); M5 added streamlit and tabulate (both now uncommented and active)
-- `tests/test_scaffold.py` — import smoke test confirming the package is importable
-- MIT license
-
-## Install
-
-```bash
-git clone https://github.com/you/synthetic-sentinel
-cd synthetic-sentinel
-pip install -e ".[dev]"
-```
-
-Or install runtime deps only:
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
-
-## Quickstart
-
-```bash
-# CLI — scan one or more images
-sentinel photo.jpg ai_art.png
-# or
-python -m sentinel.cli photo.jpg
-
-# Streamlit demo UI
-streamlit run sentinel/app.py
-
-# REST API
-python -m sentinel.api           # http://localhost:8000
-# curl -X POST http://localhost:8000/detect -H "Content-Type: application/json" \
-#   -d '{"url": "https://example.com/photo.jpg"}'
-
-# MCP server (stdio transport for Claude Desktop / Cursor)
-python -m sentinel.mcp_server
+synthetic-sentinel/
+├── sentinel/
+│   ├── detector.py      # weighted fusion of both layers; primary public API
+│   ├── heuristics.py    # EXIF absence, DCT artifact, noise-floor scorers
+│   ├── ml.py            # HuggingFace pipeline wrapper with graceful fallback
+│   ├── api.py           # FastAPI app; POST /detect
+│   ├── mcp_server.py    # MCP stdio server; exposes detect_image tool
+│   ├── cli.py           # argparse CLI; multi-target, exit-code contract
+│   ├── app.py           # Streamlit demo UI
+│   └── eval.py          # batch evaluation script; outputs accuracy/F1
+├── tests/
+│   ├── fixtures/        # real.jpg (camera EXIF present) + synthetic.jpg (none)
+│   └── test_*.py        # unit + integration tests for every layer
+├── docs/
+│   └── demo.gif
+├── pyproject.toml       # hatchling build; `sentinel` CLI entry point
+├── requirements.txt     # pinned runtime deps; see torch note above
+└── LICENSE
 ```
 
 ## Roadmap
 
-| # | Milestone | Status |
-|---|-----------|--------|
-| M1 | Scaffold + README | ✅ done |
-| M2 | Heuristics layer | ✅ done |
-| M3 | ML layer | ✅ done |
-| M4 | FastAPI + MCP server | ✅ done |
-| M5 | Streamlit UI + CLI | ✅ done |
-| M6 | Eval script + README GIF | planned |
+- [ ] Expand eval dataset to 50 real + 50 AI images and publish benchmark numbers
+- [ ] Add ONNX export of the ML classifier for faster CPU inference without PyTorch
+- [ ] Support batch `/detect` endpoint accepting a list of URLs in one request
+- [ ] Add C2PA / Content Credentials watermark check as a fourth heuristic signal
+- [ ] Package as a single Docker image so the full stack runs with one command
 
 ## License
 
-MIT © 2026 Ritik
+MIT — see LICENSE.
+
+---
+
+Built autonomously by [autodev](https://github.com/RitikPatill/autodev),
+a multi-agent orchestrator I designed. Each commit in this repo was
+authored by me; the implementation work was performed by Sonnet under
+the orchestrator's control. Read the orchestrator's README to see how.

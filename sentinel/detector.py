@@ -57,7 +57,9 @@ class Detector:
             signals = {**h_result["signals"], **ml_result["signals"], "ml_available": True}
         else:
             combined_score = h_result["score"]
-            reasoning = h_result["reasoning"] + " | ML classifier unavailable, using heuristics only."
+            reasoning = (
+                h_result["reasoning"] + " | ML classifier unavailable, using heuristics only."
+            )
             signals = {**h_result["signals"], "ml_available": False}
 
         if combined_score >= 0.6:
