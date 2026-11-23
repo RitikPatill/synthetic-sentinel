@@ -1,5 +1,9 @@
 # Synthetic Sentinel
 
+
+> **Video walkthrough:** https://youtu.be/Te2ovsqh1fA
+> **60-second overview:** https://youtu.be/PBOcNG1txpI
+
 > Local REST + MCP server that classifies images as AI-generated or real using heuristics and a CPU-only ML model.
 
 <!-- TODO: replace with a 5-10 second demo gif. Record with ScreenToGif on
